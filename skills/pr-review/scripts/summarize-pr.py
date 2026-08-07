@@ -6,7 +6,8 @@
 """
 Summarize a GitHub PR with file changes and unresolved comments.
 
-Uses the `gh` CLI (with GH_TOKEN set) to fetch PR data via the GitHub REST API.
+Uses the `gh` CLI to fetch PR data via the GitHub REST API. Auth comes from
+ambient `gh` credentials (or a token the caller exports before invoking).
 
 Usage:
     ./summarize-pr.py OWNER REPO PR_NUMBER
@@ -16,53 +17,8 @@ Example:
 """
 
 import json
-import os
 import subprocess
 import sys
-
-
-def resolve_gh_token(org: str) -> None:
-    """Resolve GH_TOKEN, falling back to GH_TOKEN_<ORG> if unset.
-
-    If GH_TOKEN is not set, checks for an org-specific variable
-    (e.g. GH_TOKEN_openshift_online) and copies it into GH_TOKEN.
-    Prints an actionable error and exits if neither is found.
-    Never prints token values — only variable names.
-    """
-    if os.environ.get("GH_TOKEN"):
-        return
-
-    normalized_org = org.lower().replace("-", "_")
-    org_var = f"GH_TOKEN_{normalized_org}"
-    org_token = os.environ.get(org_var)
-
-    if org_token:
-        os.environ["GH_TOKEN"] = org_token
-        print(f"GH_TOKEN not set; using {org_var}", file=sys.stderr)
-        return
-
-    available = sorted(k for k in os.environ if k.startswith("GH_TOKEN_"))
-    if available:
-        available_msg = "Available GH_TOKEN_* variables in the environment (names only, no values):\n" + "".join(
-            f"  {k}\n" for k in available
-        )
-        available_msg += "\nRe-run with the org name that matches one of the above, or set GH_TOKEN directly."
-    else:
-        available_msg = "No GH_TOKEN_* variables found in the environment."
-
-    print(
-        f"ERROR: GH_TOKEN is not set and no org-specific fallback {org_var} was found.\n"
-        f"\n"
-        f"{available_msg}\n"
-        f"\n"
-        f"To fix, set one of:\n"
-        f"  export GH_TOKEN=<your-github-token>\n"
-        f"  export {org_var}=<your-github-token>\n"
-        f"\n"
-        f"The token needs 'repo' scope (or 'public_repo' for public repos).",
-        file=sys.stderr,
-    )
-    sys.exit(1)
 
 
 def gh(*args: str, cwd: str | None = None) -> dict:
@@ -339,8 +295,8 @@ def main():
     repo = sys.argv[2]
     pr_number = int(sys.argv[3])
 
-    resolve_gh_token(owner)
-
+    # Auth: rely on ambient gh credentials. For multi-org tokens, the caller
+    # should prefix the invoke (see AGENTS.md / this skill's Prerequisites).
     try:
         pr = get_pr_data(owner, repo, pr_number)
         files = get_pr_files(owner, repo, pr_number)
@@ -354,8 +310,10 @@ def main():
 
     except subprocess.CalledProcessError:
         print(
-            "Error calling gh CLI: check credentials and repository access "
-            "(run gh manually to see details)",
+            "Error calling gh CLI: authenticate with `gh auth login`, or prefix "
+            "the command with the correct org token per AGENTS.md "
+            "(GH_TOKEN=$GH_TOKEN_<org> ...). Do not inspect the environment for "
+            "token values.",
             file=sys.stderr,
         )
         sys.exit(1)

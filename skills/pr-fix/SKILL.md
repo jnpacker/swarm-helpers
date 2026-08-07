@@ -244,5 +244,5 @@ Keep it concise — one or two short paragraphs. Reviewers and CI will do the fi
 - **No new Jira tickets.** This skill fixes an existing PR inline. If you discover a separate, non-trivial bug while fixing, note it in the PR comment for the author to file separately.
 - **GitHub operations** can use GitHub MCP tools when available, or fall back to `git`/`gh` CLI — use whatever is present in the environment.
 - **Minimal commits.** One commit per problem type (conflict, CI, review) is ideal.
-- **Confirm before force-pushing.** Always ask the user before `git push --force`.
+- **Confirm before a force push.** Always ask the user before using destructive git push flags.
 - **Don't over-fix.** Scope the commit to what's needed to unblock the PR. Save refactoring for a separate PR.

@@ -47,9 +47,9 @@ Use the appropriate specialist skill based on the issue type:
 
 | Issue Type | Skill |
 |---|---|
-| Sub-task / Task | `task-specialist` → `@claude/skills/task-specialist/SKILL.md` |
-| Bug | `bug-specialist` → `@claude/skills/bug-specialist/SKILL.md` |
-| Spike | `spike-specialist` → `@claude/skills/spike-specialist/SKILL.md` |
+| Sub-task / Task | `task-specialist` (invoke via your platform's skill picker / slash command) |
+| Bug | `bug-specialist` (invoke via your platform's skill picker / slash command) |
+| Spike | `spike-specialist` (invoke via your platform's skill picker / slash command) |
 
 ---
 

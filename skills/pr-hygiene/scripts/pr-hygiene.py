@@ -165,7 +165,7 @@ def discover_repos(workspace_root: str) -> list[dict]:
         candidate = os.path.join(root, entry)
         if not os.path.isdir(candidate):
             continue
-        if os.path.isdir(os.path.join(candidate, ".git")):
+        if os.path.exists(os.path.join(candidate, ".git")):
             owner_repo = resolve_owner_repo(candidate)
             if owner_repo:
                 owner, repo = owner_repo
@@ -184,7 +184,7 @@ def discover_repos(workspace_root: str) -> list[dict]:
                 continue
             for sub_entry in sub_entries:
                 sub_candidate = os.path.join(candidate, sub_entry)
-                if os.path.isdir(os.path.join(sub_candidate, ".git")):
+                if os.path.exists(os.path.join(sub_candidate, ".git")):
                     owner_repo = resolve_owner_repo(sub_candidate)
                     if owner_repo:
                         owner, repo = owner_repo
@@ -199,7 +199,13 @@ def discover_repos(workspace_root: str) -> list[dict]:
 
 
 def resolve_owner_repo(repo_path: str) -> tuple[str, str] | None:
-    """Parse the `origin` remote URL of a local git repo into (owner, repo)."""
+    """Parse the `origin` remote URL of a local git repo into (owner, repo).
+
+    Only GitHub remotes (github.com) are accepted. Non-GitHub remotes
+    (GitLab, Bitbucket, internal Git servers, etc.) are rejected so they
+    can never be mapped onto an unrelated GitHub owner/repo and have PRs
+    scanned or mutated under the wrong host.
+    """
     try:
         result = subprocess.run(
             ["git", "-C", repo_path, "remote", "get-url", "origin"],
@@ -212,8 +218,12 @@ def resolve_owner_repo(repo_path: str) -> tuple[str, str] | None:
 
     url = result.stdout.strip()
     # Matches both SSH (git@github.com:owner/repo.git) and HTTPS
-    # (https://github.com/owner/repo.git) remote URL forms.
-    match = re.search(r"[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$", url)
+    # (https://github.com/owner/repo.git) remote URL forms, requiring the
+    # host to be github.com so non-GitHub remotes are rejected outright.
+    match = re.search(
+        r"^(?:git@|ssh://git@|https?://)github\.com[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$",
+        url,
+    )
     if not match:
         return None
     return match.group(1), match.group(2)
@@ -290,13 +300,39 @@ def get_reviewers(reviews: list, author_login: str | None = None) -> list[str]:
     return seen
 
 
-def find_hygiene_draft_comment(comments: list) -> datetime | None:
-    """Return the timestamp of the most recent hygiene draft-conversion comment."""
-    matches = [
-        parse_iso(c["created_at"])
-        for c in comments
-        if DRAFT_COMMENT_MARKER in (c.get("body") or "")
-    ]
+def get_authenticated_login() -> str | None:
+    """Return the login of the currently authenticated `gh` actor, or None on failure."""
+    try:
+        data = gh_json("api", "user")
+    except subprocess.CalledProcessError:
+        return None
+    return data.get("login") if isinstance(data, dict) else None
+
+
+def find_hygiene_draft_comment(comments: list, bot_login: str | None) -> datetime | None:
+    """Return the timestamp of the most recent hygiene draft-conversion comment.
+
+    Scoped to comments authored by this skill's own `gh` identity (`bot_login`),
+    so that a comment merely quoting or echoing the marker text (e.g. a reply,
+    or a mirror/sync bot) isn't mistaken for this skill's own draft-conversion
+    comment -- that would silently push back the tracked draft-start date and
+    delay automatic needs-undraft/needs-close decisions.
+
+    Fails closed: if `bot_login` couldn't be resolved (e.g. `gh api user`
+    failed), no match is returned at all. `classify_pr` treats a missing
+    hygiene comment as "don't assume ownership" (`human-draft`), so an
+    unresolved identity never authorizes a needs-undraft/needs-close mutation
+    based on an unverified comment author.
+    """
+    if bot_login is None:
+        return None
+    matches = []
+    for c in comments:
+        if DRAFT_COMMENT_MARKER not in (c.get("body") or ""):
+            continue
+        if (c.get("user") or {}).get("login") != bot_login:
+            continue
+        matches.append(parse_iso(c["created_at"]))
     return max(matches) if matches else None
 
 
@@ -316,7 +352,14 @@ def extract_jira_key(pr: dict) -> str | None:
     return None
 
 
-def classify_pr(pr: dict, commits: list, comments: list, reviews: list, now: datetime) -> dict:
+def classify_pr(
+    pr: dict,
+    commits: list,
+    comments: list,
+    reviews: list,
+    now: datetime,
+    bot_login: str | None = None,
+) -> dict:
     labels = pr_label_names(pr)
 
     if EXEMPT_LABEL in labels:
@@ -326,7 +369,7 @@ def classify_pr(pr: dict, commits: list, comments: list, reviews: list, now: dat
     has_stale_label = STALE_LABEL in labels
 
     commit_date = last_commit_date(commits)
-    hygiene_comment_date = find_hygiene_draft_comment(comments)
+    hygiene_comment_date = find_hygiene_draft_comment(comments, bot_login)
 
     author_login = (pr.get("author") or {}).get("login")
 
@@ -365,13 +408,6 @@ def classify_pr(pr: dict, commits: list, comments: list, reviews: list, now: dat
     reference_date = commit_date or parse_iso(pr["createdAt"])
     days_idle = business_days_between(reference_date, now)
 
-    if days_idle >= DRAFT_DAYS_THRESHOLD:
-        return {
-            "action": "needs-draft",
-            "reason": f"{days_idle} business day(s) since last commit",
-            "days": days_idle,
-        }
-
     if needs_rereview:
         return {
             "action": "needs-rereview",
@@ -379,17 +415,49 @@ def classify_pr(pr: dict, commits: list, comments: list, reviews: list, now: dat
             "reviewers": get_reviewers(reviews, author_login),
         }
 
+    if days_idle >= DRAFT_DAYS_THRESHOLD:
+        return {
+            "action": "needs-draft",
+            "reason": f"{days_idle} business day(s) since last commit",
+            "days": days_idle,
+        }
+
     return {"action": "healthy", "reason": f"{days_idle} business day(s) idle", "days": days_idle}
+
+
+def sanitize_gh_error(exc: subprocess.CalledProcessError) -> str:
+    """Return a safe, non-sensitive summary of a failed `gh` invocation.
+
+    Raw `gh` stderr on auth/network failures can include tokens, repo/org
+    identifiers embedded in request URLs, or other sensitive context. Since
+    this output is serialized into the JSON action plan (which may be
+    printed, logged, or posted in a PR/report), classify the failure into a
+    fixed, non-sensitive category plus the process exit code instead of
+    including raw stderr verbatim.
+    """
+    stderr = (exc.stderr or "").lower()
+    if "401" in stderr or "403" in stderr or "authentication" in stderr or "bad credentials" in stderr:
+        category = "authentication failed"
+    elif "404" in stderr or "not found" in stderr:
+        category = "not found"
+    elif "rate limit" in stderr:
+        category = "rate limited"
+    elif "could not resolve host" in stderr or "network" in stderr or "timeout" in stderr:
+        category = "network error"
+    else:
+        category = "command failed"
+    return f"gh {category} (exit code {exc.returncode})"
 
 
 def scan_repo(owner: str, repo: str) -> dict:
     resolve_gh_token(owner)
+    bot_login = get_authenticated_login()
     entry: dict = {"owner": owner, "repo": repo, "prs": [], "error": None}
 
     try:
         prs = list_open_prs(owner, repo)
     except subprocess.CalledProcessError as exc:
-        entry["error"] = f"gh pr list failed: {exc.stderr.strip() if exc.stderr else exc}"
+        entry["error"] = f"gh pr list failed: {sanitize_gh_error(exc)}"
         return entry
 
     now = datetime.now(timezone.utc)
@@ -405,12 +473,12 @@ def scan_repo(owner: str, repo: str) -> dict:
                 {
                     "number": pr_number,
                     "title": pr["title"],
-                    "error": f"failed to fetch PR detail: {exc.stderr.strip() if exc.stderr else exc}",
+                    "error": f"failed to fetch PR detail: {sanitize_gh_error(exc)}",
                 }
             )
             continue
 
-        classification = classify_pr(pr, commits, comments, reviews, now)
+        classification = classify_pr(pr, commits, comments, reviews, now, bot_login)
         entry["prs"].append(
             {
                 "number": pr_number,

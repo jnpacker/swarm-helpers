@@ -33,7 +33,15 @@ dependencies beyond the standard library.
 PRs with the `do-not-stale` label are exempt from all staleness actions.
 PRs a human put into draft (no `stale` label present) are never touched —
 this skill only acts on drafts it created itself, identified by the
-`stale` label plus its own marker comment.
+`stale` label plus its own marker comment. That marker-comment match is
+scoped to the currently authenticated `gh` identity (resolved via
+`gh api user`), so a reply or a mirror/sync bot merely quoting the marker
+text can't be mistaken for this skill's own draft-conversion comment and
+push back the tracked draft-start date. The match **fails closed**: if the
+identity can't be resolved (e.g. `gh api user` errors), no marker comment
+is matched at all, and a stale-labeled draft is treated as `human-draft`
+(no `needs-undraft`/`needs-close` mutation) rather than trusting a match
+against an unverified author.
 
 ## Step 1 — Discover repositories
 
@@ -46,7 +54,10 @@ inside a single repo, or `/sandbox` in scheduled/agent-swarm contexts.
 The script performs discovery itself (walks up to two levels deep for
 `.git` directories and resolves `owner/repo` from each `origin` remote),
 so this step is just confirming the root path with the user, not a
-separate manual scan.
+separate manual scan. Only `github.com` remotes are accepted — a repo
+whose `origin` points at GitLab, Bitbucket, or an internal Git server is
+skipped and reported rather than being silently mapped onto an unrelated
+GitHub `owner/repo`.
 
 ## Step 2 — Scan PRs
 
@@ -89,7 +100,10 @@ The script prints a JSON action plan to stdout, e.g.:
 
 If a repo entry has a non-null `error` (e.g. `gh` auth failure for that
 org), report it and continue with the remaining repos — don't abort the
-whole run over one broken repo (graceful degradation).
+whole run over one broken repo (graceful degradation). `error` values are
+sanitized categories (e.g. `"gh authentication failed (exit code 1)"`),
+never raw `gh` stderr — the script never serializes tokens or
+credential-bearing URLs into the JSON action plan.
 
 If `total_prs` is 0, report "No open PRs found across N repo(s)." and stop.
 
@@ -215,7 +229,7 @@ action. Log them in the final report's counts only.
 
 After executing all actions, print a summary:
 
-```
+```text
 === PR HYGIENE COMPLETE ===
 Workspace:    <workspace_root>
 Repos scanned: <N> (<N> with errors)
@@ -252,19 +266,23 @@ Jira updates:
 ## Dependencies
 
 ### CLI tools
+
 - `gh` — GitHub CLI, authenticated via `GH_TOKEN` (or `GH_TOKEN_<ORG>` per
   the multi-org token pattern in `practices/opencode-setup.md`)
 - `python3` (>= 3.11) or `uv` — to run `scripts/pr-hygiene.py`
 
 ### MCP tools
+
 - `mcp__github-*` — optional alternative to the `gh` CLI commands in Step 4
 - `mcp__jira-mcp-server__add_comment` — optional Jira comment on closure
   (graceful degradation if unavailable)
 
 ### Related skills
+
 - `pr-review` — for reviewing PR content/code quality (not lifecycle)
 - `pr-fix` — for fixing a blocked PR (conflicts, CI, review comments)
 
 ### Supporting files
+
 - `scripts/pr-hygiene.py` — repo discovery, PR scanning, business-day
   calculation, and classification (read-only; outputs a JSON action plan)

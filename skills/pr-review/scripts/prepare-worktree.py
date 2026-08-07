@@ -22,77 +22,12 @@ Returns:
     Prints the path to the worktree directory on success.
 """
 
-import os
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from git import Repo
-from git.exc import GitCommandError, InvalidGitRepositoryError, NoSuchPathError
-
-
-def extract_org_from_remote(repo_path: str) -> str | None:
-    """Extract the GitHub org/owner from the first GitHub remote URL.
-
-    Parses git remote URLs locally (no network call needed).
-    Handles both SSH and HTTPS URL formats.
-    """
-    try:
-        repo = Repo(repo_path)
-        for remote in repo.remotes:
-            url = remote.url
-            # SSH: git@github.com:owner/repo.git
-            if "github.com:" in url:
-                return url.split("github.com:")[1].split("/")[0]
-            # HTTPS: https://github.com/owner/repo.git
-            if "github.com/" in url:
-                return url.split("github.com/")[1].split("/")[0]
-    except (InvalidGitRepositoryError, NoSuchPathError):
-        pass
-    return None
-
-
-def resolve_gh_token(org: str) -> None:
-    """Resolve GH_TOKEN, falling back to GH_TOKEN_<ORG> if unset.
-
-    If GH_TOKEN is not set, checks for an org-specific variable
-    (e.g. GH_TOKEN_openshift_online) and copies it into GH_TOKEN.
-    Prints an actionable error and exits if neither is found.
-    Never prints token values — only variable names.
-    """
-    if os.environ.get("GH_TOKEN"):
-        return
-
-    normalized_org = org.lower().replace("-", "_")
-    org_var = f"GH_TOKEN_{normalized_org}"
-    org_token = os.environ.get(org_var)
-
-    if org_token:
-        os.environ["GH_TOKEN"] = org_token
-        print(f"GH_TOKEN not set; using {org_var}", file=sys.stderr)
-        return
-
-    available = sorted(k for k in os.environ if k.startswith("GH_TOKEN_"))
-    if available:
-        available_msg = "Available GH_TOKEN_* variables in the environment (names only, no values):\n" + "".join(
-            f"  {k}\n" for k in available
-        )
-        available_msg += "\nRe-run with the org name that matches one of the above, or set GH_TOKEN directly."
-    else:
-        available_msg = "No GH_TOKEN_* variables found in the environment."
-
-    print(
-        f"ERROR: GH_TOKEN is not set and no org-specific fallback {org_var} was found.\n"
-        f"\n"
-        f"{available_msg}\n"
-        f"\n"
-        f"To fix, set one of:\n"
-        f"  export GH_TOKEN=<your-github-token>\n"
-        f"  export {org_var}=<your-github-token>\n"
-        f"\n"
-        f"The token needs 'repo' scope (or 'public_repo' for public repos).",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+from git.exc import GitCommandError
 
 
 def get_pr_info(repo_path: str, pr_number: int) -> dict:
@@ -202,7 +137,7 @@ def prepare_worktree(repo_path: str, pr_number: int) -> str:
 ## PR Information
 - **Branch**: `{branch_name}`
 - **Worktree**: `{worktree_path}`
-- **Review Started**: {subprocess.run(['date', '+%Y-%m-%d %H:%M:%S'], capture_output=True, text=True).stdout.strip()}
+- **Review Started**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Review Progress
 
@@ -285,7 +220,7 @@ def prepare_worktree(repo_path: str, pr_number: int) -> str:
             # Prune worktree references
             repo.git.worktree("prune")
 
-    # Fetch the PR ref without checking it out in the main repo
+    # Fetch the PR ref without switching the main repo to that ref
     # This preserves the main repo's current state
     try:
         # First, ensure the local branch doesn't already exist
@@ -327,32 +262,8 @@ def main():
     repo_path = sys.argv[1]
     pr_number = int(sys.argv[2])
 
-    org = extract_org_from_remote(repo_path)
-    if org:
-        resolve_gh_token(org)
-    elif not os.environ.get("GH_TOKEN"):
-        available = sorted(k for k in os.environ if k.startswith("GH_TOKEN_"))
-        if available:
-            available_msg = "Available GH_TOKEN_* variables in the environment (names only, no values):\n" + "".join(
-                f"  {k}\n" for k in available
-            )
-            available_msg += "\nRe-run after setting GH_TOKEN, or use the org name matching one of the above."
-        else:
-            available_msg = "No GH_TOKEN_* variables found in the environment."
-
-        print(
-            "ERROR: GH_TOKEN is not set and could not determine the GitHub org from git remotes.\n"
-            "\n"
-            f"{available_msg}\n"
-            "\n"
-            "To fix, set GH_TOKEN before running this script:\n"
-            "  export GH_TOKEN=<your-github-token>\n"
-            "\n"
-            "The token needs 'repo' scope (or 'public_repo' for public repos).",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
+    # Auth: rely on ambient gh credentials. For multi-org tokens, the caller
+    # should prefix the invoke (see AGENTS.md / this skill's Prerequisites).
     try:
         worktree_path = prepare_worktree(repo_path, pr_number)
         print(worktree_path)
