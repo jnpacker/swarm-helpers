@@ -11,6 +11,18 @@ Create a new Jira issue interactively. Includes duplicate detection, structured 
 
 Follow these steps in order. Use `AskUserQuestion` for each step. Do NOT skip steps or guess values.
 
+### Step 0: Pre-Execution Checks
+
+Before collecting input:
+
+1. Verify Jira MCP connectivity with a read-only search. If it fails, stop and
+   explain that Jira MCP must be available; do not attempt issue creation.
+2. Resolve the project key and assignee from the target repository's
+   `AGENTS.md`, connected tool context, or user-provided configuration. Do not
+   read Supervisor-local files or guess missing values.
+3. If plan mode is active, tell the user that the skill will draft and review
+   the issue but will not create it until plan mode ends and the user confirms.
+
 ### Step 1: Issue Type
 
 Use `AskUserQuestion` to ask the user what type of issue to create:
@@ -27,11 +39,17 @@ Use `AskUserQuestion` to ask the user what type of issue to create:
 
 ### Step 2: Duplicate Search
 
-Before collecting any other fields, search for similar open issues using JQL. Read the project key from personal config (tool-aware fallback chain — see `AGENTS.md`).
+Before collecting any other fields, search across issue types for similar open
+issues in the selected project. Read the project key from the target
+repository's `AGENTS.md` or available configuration.
 
-Run: `issuetype = [selected type] AND project = [PROJECT] AND summary ~ "[keywords from user's intent]" AND status != Closed ORDER BY updated DESC`
+Run: `project = [PROJECT] AND summary ~ "[keywords from user's intent]" AND status != Closed ORDER BY updated DESC`
 
-If similar issues are found, present them to the user and ask whether to proceed with a new issue or use an existing one. If no duplicates are found, continue.
+If similar issues are found, present their key, type, summary, status, and
+assignee. Distinguish same-type likely duplicates from other related work, then
+ask whether to use an existing issue, refine the search, or explicitly proceed
+with a new issue. Do not continue until the user chooses to proceed or the
+refined search returns no similar issues.
 
 ### Step 3: Load the Specialist Skill
 
@@ -94,6 +112,11 @@ If no parent is provided, proceed with the normal Activity Type selection.
 
 **Activity Type** (required — must always be set; never leave unset or skip) — If inherited from the parent (see above), confirm the inherited value with the user and allow override. Otherwise, present all options with a brief recommendation based on the issue type and description, using the decision tree below.
 
+When available, fetch the project's allowed Activity Type options from Jira
+metadata and use the returned IDs and labels. If metadata lookup is unavailable,
+use the verified option table below. If the parent is an Epic, also fetch and
+offer to inherit its priority, defaulting to Normal when none is set.
+
 Jira field key: `customfield_10464`. Set via MCP as `"customfield_10464": {"id": "<option_id>"}`.
 
 | Activity Type | Option ID | Best for |
@@ -119,6 +142,10 @@ Jira field key: `customfield_10464`. Set via MCP as `"customfield_10464": {"id":
 
 **Story Points** (default: 1) — MUST always be prompted for via `AskUserQuestion`. If the user does not provide a value, use 1.
 
+Resolve the Story Points field ID from project create-field metadata or Jira
+field search before creating. Do not assume a custom field ID is identical
+across Jira projects or instances.
+
 ### Step 5: Collect Categorization Fields
 
 Use `AskUserQuestion` to collect:
@@ -127,14 +154,23 @@ Use `AskUserQuestion` to collect:
 
 **Labels** — Ask if they want to add any labels (free text, comma-separated).
 
-**Target Version** — Ask for the target version (fetch available versions using the registered Jira MCP tools if needed). Use `customfield_10855` for target version (NOT fix version for new/in-progress issues).
+**Target Version** — Ask for the target version and fetch available versions
+using the registered Jira MCP tools. Resolve the Target Version field ID from
+the target project's field metadata; `customfield_10855` is common but must not
+be assumed for every project. Use Target Version, not fix version, for
+new/in-progress issues.
 
 ### Step 6: Parent / Linking
 
 If a parent was already provided in Step 4, use that key here — do not ask again. Otherwise, use `AskUserQuestion` to ask if there is a parent or related issue.
 
 - If **Sub-task**: The parent issue key is required. Set the `parent` field on create.
-- If **any other type** and a parent is provided: Create the issue first, then link it. Ask which link type to use (Blocks, Depends, Related, Incorporates, etc.).
+- If **Story or Task** belongs to an Epic: set the Epic Link field atomically
+  during creation. Do not use the parent field, which is for hierarchy levels
+  that support Jira's Parent Link relationship.
+- If **any other type** and a related issue is provided: Create the issue first,
+  then link it. Ask which link type to use (Blocks, Depends, Related,
+  Incorporates, etc.).
 - If **Epic**: Ask for an `epic_name` (required for Epics).
 
 ### Step 7: Quality Grade
@@ -160,14 +196,32 @@ Assign an overall grade: **[A] READY**, **[B] MINOR GAPS**, **[C] NEEDS WORK**, 
 
 Before calling the create MCP tool, display a summary of ALL fields and the quality grade. Ask for confirmation.
 
-Always set:
+Before creating, verify that the issue has all required fields. Always set:
 - `project_key`: from personal config (tool-aware — see `AGENTS.md` fallback chain)
+- `summary` and non-empty `description`
+- selected `issue_type`
+- explicit `priority` (never allow Jira's Undefined default)
 - `security_level`: "Red Hat Employee" (ID: `10034`)
+- Activity Type (`customfield_10464`)
+- Story Points using the field ID resolved for the project
 - `assignee`: from personal config (tool-aware — see `AGENTS.md` fallback chain)
+- `parent` for Sub-tasks and Epic Link for Stories/Tasks under an Epic, when applicable
 
-Call the registered Jira MCP create tool with all collected fields.
+For a single issue, pass required fields atomically in the create call. Use a
+batch tool only when the environment provides one and every issue can receive
+all required fields safely; otherwise create issues individually. Never rely
+on a follow-up update as the only way to set a required security level.
 
 After creation, if linking is needed, call the link MCP tool.
+
+### Step 8.5: Read-Back Verification
+
+Immediately fetch each created issue and verify that Activity Type, security
+level, priority, description, assignee, Story Points, and any required parent
+or Epic association were persisted correctly. Repair a missing field with Jira
+MCP and verify again. If a required field cannot be repaired, explain the
+incomplete issue and the corrective action needed; do not report successful
+completion.
 
 ### Step 9: Post-Creation
 
@@ -182,3 +236,5 @@ After successful creation:
 - Validate time estimates use Jira format (e.g., '1h 30m', '2d')
 - If the create call fails, show the error and ask the user what to fix
 - Never retry creation without user confirmation
+- If required fields are missing after creation, repair and verify them before
+  reporting success
