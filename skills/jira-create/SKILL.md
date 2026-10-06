@@ -33,23 +33,28 @@ Run: `issuetype = [selected type] AND project = [PROJECT] AND summary ~ "[keywor
 
 If similar issues are found, present them to the user and ask whether to proceed with a new issue or use an existing one. If no duplicates are found, continue.
 
-### Step 3: Delegate to Specialist Agent
+### Step 3: Load the Specialist Skill
 
-Based on the issue type selected, launch the appropriate specialist agent to help craft the content. The agent should help formulate the summary, description, and any type-specific fields.
+Before drafting the content, load the specialist skill from its public
+`jnpacker/swarm-helpers` URL below. Do not assume the specialist is installed
+in the agent environment or launch a named subagent unless that environment
+provides one. Read the matching template from its public URL as well.
 
-| Issue Type | Agent | Template to reference |
-|------------|-------|-----------------------|
-| Story | `story-specialist` | `skills/story-specialist/template.md` |
-| Bug | `bug-specialist` | `skills/bug-specialist/template.md` |
-| Task | `task-specialist` | `skills/task-specialist/template.md` |
-| Spike | `spike-specialist` | `skills/spike-specialist/template.md` |
-| Feature | `feature-specialist` | `skills/feature-specialist/template.md` |
-| Epic | `epic-specialist` | `skills/epic-specialist/template.md` |
-| Initiative | `initiative-specialist` | `skills/initiative-specialist/template.md` |
-| Outcome | `outcome-specialist` | `skills/outcome-specialist/template.md` |
-| Sub-task | `task-specialist` | `skills/task-specialist/subtask-template.md` |
+| Issue Type | Specialist skill | Supporting template |
+|------------|------------------|---------------------|
+| Story | [story-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/story-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/story-specialist/template.md) |
+| Bug | [bug-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/bug-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/bug-specialist/template.md) |
+| Task | [task-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/task-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/task-specialist/template.md) |
+| Spike | [spike-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/spike-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/spike-specialist/template.md) |
+| Feature | [feature-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/feature-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/feature-specialist/template.md) |
+| Epic | [epic-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/epic-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/epic-specialist/template.md) |
+| Initiative | [initiative-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/initiative-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/initiative-specialist/template.md) |
+| Outcome | [outcome-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/outcome-specialist/SKILL.md) | [template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/outcome-specialist/template.md) |
+| Sub-task | [task-specialist](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/task-specialist/SKILL.md) | [subtask template](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/task-specialist/subtask-template.md) |
 
-The agent should return a proposed **summary** and **description**. Present them to the user for approval or editing via `AskUserQuestion`.
+Use the loaded skill and template to prepare a proposed **summary** and
+**description**. Present them to the user for approval or editing via
+`AskUserQuestion`.
 
 ### Step 3b: Type-Appropriateness Check
 
