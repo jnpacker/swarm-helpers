@@ -1,6 +1,7 @@
 ---
 name: pr-hygiene
 description: Use when managing PR lifecycle across workspace repositories — scans every cloned repo for stale open PRs, converts inactive PRs to draft with a warning after 4 business days, closes stale drafts after 5 more business days, and detects PRs needing re-review after new commits. Designed for scheduled runs over one or more repos cloned under a workspace directory (e.g. /sandbox). NOT for reviewing PR content or code quality — see `pr-review` for that.
+category: Fleet Engineering
 ---
 
 # PR Hygiene
@@ -29,7 +30,6 @@ dependencies beyond the standard library.
 | 9 (5 biz days after the draft comment) | Still no new commits | Close as stale |
 | Any point while in draft | New commit pushed after the draft comment | Take out of draft, remove `stale` label, clock resets to 0, request re-review |
 | Any point while open (non-draft) | New commit pushed after the last review | Request re-review (not stale — no draft/close action) |
-| Any point while open (non-draft) | Still carries the `stale` label (a human/author undrafted it without removing the label) | Restore properly: remove `stale` label, post "Restored" comment, request re-review — same as `needs-undraft` |
 
 PRs with the `do-not-stale` label are exempt from all staleness actions.
 PRs a human put into draft (no `stale` label present) are never touched —
@@ -137,29 +137,10 @@ canonical fallback (P2).
 
 ### 4a. `needs-draft` — convert to draft
 
-Before posting the draft comment, check whether a `PR Hygiene: Converted to
-draft` comment (by the current `gh` identity) already exists on this PR:
-
-```bash
-existing=$(gh api repos/<OWNER>/<REPO>/issues/<NUMBER>/comments \
-  --jq '[.[] | select(.body | contains("PR Hygiene: Converted to draft"))] | length')
-```
-
-If `existing` is greater than 0, **skip posting a duplicate comment** — log
-that it was skipped and still apply the draft/label steps below. This is a
-defense-in-depth guard: `classify_pr()` should never route an
-already-hygiene-drafted PR back through `needs-draft` (see the
-`needs-undraft` branch for open PRs still carrying the `stale` label), but
-if it ever does — e.g. a future regression or race — a duplicate marker
-comment would silently reset the staleness clock and the PR would never
-reach `needs-close`. Skipping the duplicate keeps the original comment's
-timestamp authoritative.
-
 ```bash
 gh pr ready <NUMBER> --repo <OWNER>/<REPO> --undo
 gh pr edit <NUMBER> --repo <OWNER>/<REPO> --add-label stale
-if [ "$existing" -eq 0 ]; then
-  gh pr comment <NUMBER> --repo <OWNER>/<REPO> --body "$(cat <<'EOF'
+gh pr comment <NUMBER> --repo <OWNER>/<REPO> --body "$(cat <<'EOF'
 **PR Hygiene: Converted to draft**
 
 This PR has had no new commits for 4 business days and has been converted to draft.
@@ -171,7 +152,6 @@ To prevent automatic closure, push a commit or add the `do-not-stale` label.
 *-- PR Hygiene Agent*
 EOF
 )"
-fi
 ```
 
 The exact comment text matters: Step 2's classification logic on the next
@@ -179,14 +159,6 @@ run finds this comment by matching the string `PR Hygiene: Converted to
 draft` to determine when the draft clock started. Do not reword it.
 
 ### 4b. `needs-undraft` — restore from draft and request re-review
-
-This action also covers the case where the PR is **already non-draft** but
-still carries the `stale` label — e.g. a human or the author clicked "ready
-for review" without removing the label. `gh pr ready` is a no-op on a PR
-that's already ready, so the same sequence below safely handles both cases:
-it cleans up the leftover `stale` label and posts the "Restored" comment,
-closing out the old draft cycle before any new staleness evaluation can
-begin.
 
 ```bash
 gh pr ready <NUMBER> --repo <OWNER>/<REPO>
@@ -284,13 +256,6 @@ Jira updates:
   drafted it intentionally — leave it alone regardless of age.
 - **Never reword the draft-conversion comment.** The classification logic
   depends on matching its exact marker text on the next run.
-- **Never post a second "Converted to draft" comment on the same PR.**
-  Always check for an existing marker comment first (Step 4a). A duplicate
-  comment resets the staleness clock and can make a PR un-closeable.
-- **Never treat an open (non-draft) PR that still has the `stale` label as
-  a fresh `needs-draft` candidate.** It must go through `needs-undraft`
-  first to clean up the leftover label and post the "Restored" comment —
-  otherwise the old cycle never closes out and the clock keeps resetting.
 - **Never force-push or modify PR branches.** This skill only changes PR
   metadata (draft state, labels, comments, open/closed state) — never
   code.

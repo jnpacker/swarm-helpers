@@ -22,11 +22,6 @@ Discovers every git repo under a workspace root, lists its open PRs via the
       -> draft-waiting (no action yet)
   - Draft PR without a `stale` label
       -> human-draft   (a human drafted it; never touch)
-  - Open (non-draft) PR that still carries the `stale` label (a human/author
-    undrafted it without removing the label)
-      -> needs-undraft (remove `stale`, post "Restored" comment, request
-                         re-review; closes out the old cycle before any new
-                         staleness evaluation)
   - Open (non-draft) PR with a commit pushed after the last review
       -> needs-rereview (request re-review only; not stale)
   - PR with the `do-not-stale` label
@@ -405,20 +400,6 @@ def classify_pr(
 
     if is_draft and not has_stale_label:
         return {"action": "human-draft", "reason": "draft without stale label"}
-
-    # Open (non-draft) PR that still carries the stale label -- a human/author
-    # un-drafted it without removing the label. Treat as needs-undraft so
-    # state is cleaned up properly (remove label, post "Restored" comment,
-    # request re-review) before any new staleness cycle can begin. Without
-    # this branch, the PR falls through to the "Open (non-draft) PR" logic
-    # below and can be re-classified as needs-draft, posting a duplicate
-    # marker comment that silently resets the staleness clock.
-    if not is_draft and has_stale_label:
-        return {
-            "action": "needs-undraft",
-            "reason": "open PR still carrying stale label from a previous draft cycle",
-            "reviewers": get_reviewers(reviews, author_login),
-        }
 
     # Open (non-draft) PR.
     review_date = last_review_date(reviews)

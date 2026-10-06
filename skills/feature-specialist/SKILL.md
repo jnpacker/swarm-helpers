@@ -1,6 +1,7 @@
 ---
 name: feature-specialist
 description: Use when defining significant customer-facing capabilities, planning feature strategy, coordinating major product enhancements, or managing feature lifecycle across multiple epics and teams.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

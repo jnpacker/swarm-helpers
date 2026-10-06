@@ -1,6 +1,7 @@
 ---
 name: pr-fix
 description: Fix a PR's merge conflicts, failing CI checks (test/lint), or unresolved review comments, then push the fix directly to the PR branch.
+category: Fleet Engineering
 ---
 
 # PR Fix Skill
@@ -95,6 +96,17 @@ Confirm you are on the right branch and at the right commit before making any ch
 
 ---
 
+## Step 3.5 — Shared pre-write gate
+
+Before any write operation in Steps 4-7 (file edits, commits, pushes, PR/Jira comments, or thread resolution):
+
+- If plan/read-only mode is active, stop and ask the user to switch to Build mode first.
+- In non-plan mode, request explicit user confirmation before executing writes.
+
+Re-check this gate immediately before each write step; do not assume a prior confirmation still applies.
+
+---
+
 ## Step 4A — Fix: Merge Conflicts
 
 **Only follow this section if merge conflicts were detected.**
@@ -167,20 +179,35 @@ git commit -S -s -m "fix: <short description of what was wrong>
 
 **Only follow this section if unresolved review threads exist.**
 
-Fetch all unresolved threads via the GitHub API.
+Fetch review threads using a resolution-aware source (GitHub GraphQL or GitHub MCP review-thread APIs) with pagination.
+
+For every fetched thread, record:
+- Stable thread ID (for example, GraphQL `PRRT_...` node ID)
+- File path and line
+- `isResolved` state
+- Latest comment body/author
+
+Do not use APIs or scripts that only return a flattened comment list without thread IDs or resolution state.
 
 For each unresolved thread:
 
-1. **Read the thread body** — understand what the reviewer is asking.
+1. **Read the thread body** — understand what the reviewer is asking. Note whether the review is from `coderabbitai[bot]` or a human reviewer.
 2. **Locate the file and line** from the thread's `path` and `line` fields.
-3. **Classify the comment:**
-   - **Suggestion with replacement** → apply it verbatim unless you have a strong reason not to.
-   - **Nitpick / style** → apply it; these are usually straightforward.
-   - **Correctness concern** → investigate before applying; verify the bug is real.
-   - **Question / clarification** → if a code fix answers it, make the fix; otherwise note it in a PR comment reply.
-4. **Apply the fix** to the file.
+3. **Evaluate whether the fix is warranted:**
+   - Spend ample thinking on whether this is genuinely an issue that needs to be addressed.
+   - **Major & Critical findings (security vulnerabilities, functional bugs, resource leaks, data loss)**:
+     - **Must be fixed or block merge:** Major and Critical CodeRabbit or reviewer findings **cannot be declined solely as out of scope**. In accordance with repository review policy, they must either be resolved directly on the PR branch or explicitly block the merge.
+     - **Dismissal only for verified false positives:** A Major or Critical finding may only be dismissed if full-codebase inspection conclusively proves it is a false positive. Always document the concrete technical justification in the PR reply and summary.
+   - **Check scope and intent:** Is this comment directly related to the original intent of the PR or one of the necessary review fixes?
+   - **Reject out-of-scope / tangential suggestions:** For non-blocking suggestions, stylistic preferences, speculative micro-optimizations, or tangential refactoring outside the PR's scope, use discretion to decline or defer them rather than creating unnecessary churn. Explain why in the PR response/summary (or recommend a follow-up issue if it is a valid separate improvement).
+   - **Filter false positives:** Automated reviewers analyze diff hunks in isolation and lack full-repo context. Verify technical validity against the whole codebase before assuming the reviewer is correct.
+4. **Review implications and blast radius before applying:**
+   - **Take into account that fixing an issue might create new issues.**
+   - Analyze secondary impacts: callers, type contracts, error handling paths, nil/null safety, concurrency/race conditions, and behavioral invariants across the repo.
+   - **Never apply AI / CodeRabbit suggestions blindly or verbatim:** Treat suggestions as advisory cues rather than copy-paste patches. CodeRabbit snippets may hallucinate APIs, break invariants, or introduce subtle regressions. Always adapt the fix so it integrates safely and idiomatically with existing project conventions without creating new bugs.
+5. **Apply the fix** to the file(s) carefully.
 
-After addressing all threads, commit:
+After addressing all warranted threads, commit:
 
 ```bash
 git commit -S -s -m "fix: address review comments
@@ -189,21 +216,28 @@ git commit -S -s -m "fix: address review comments
 "
 ```
 
-If a comment raises a concern you intentionally disagree with, do **not** silently skip it — note it in the PR comment you post in Step 6.
+If a comment raises an unwarranted concern or is intentionally declined/skipped, do **not** silently ignore it — document the reasoning in the PR comment you post in Step 7.
 
 ---
 
 ## Step 5 — Validate before pushing
 
-Run the full local check suite to make sure the fixes don't introduce new failures.
-Use whatever targets the repo exposes (check `Makefile` and `CLAUDE.md`):
+1. **Review the diff for unintended side effects:**
+   Inspect the changes across the branch:
+   ```bash
+   git diff origin/<base.ref>
+   ```
+   Critically evaluate whether the fixes introduced any regressions, altered unexpected behavior, or created new issues.
 
-```bash
-make lint   # if available
-make test   # if available and fast
-```
+2. **Run local check suites:**
+   Run the full local check suite to make sure the fixes don't introduce new failures. Use whatever targets the repo exposes (check `Makefile` and `CLAUDE.md`):
 
-If any check fails, return to the relevant Step 4 section and fix it before continuing.
+   ```bash
+   make lint   # if available
+   make test   # if available and fast
+   ```
+
+If any check fails or secondary issues are spotted in the diff, return to the relevant Step 4 section and fix it before continuing.
 
 ---
 
@@ -221,13 +255,31 @@ Do **not** force-push unless the branch history requires it (e.g., a rebase-base
 
 ## Step 7 — Post a summary comment on the PR and update Jira
 
+Before any Step 7 write operation (PR thread replies, thread resolution, PR summary comment, Jira updates):
+
+- If plan/read-only mode is active, stop and ask the user to switch to Build mode first.
+- In non-plan mode, request explicit user confirmation before executing these writes.
+
+Before posting the summary, use the Step 4C resolution-aware thread data to handle each addressed unresolved thread:
+
+- Add a concise thread reply describing the fix and include the commit SHA.
+- Resolve the thread after replying (for example via GitHub MCP `resolve_thread`).
+- Do **not** resolve threads that were declined, deferred, or still need reviewer input.
+
 **On the PR**, post a brief summary comment:
+
+**Title:** `## 🛠️ PR Fix Summary`
 
 **Structure:**
 - What problem type(s) were fixed (merge conflict / CI failure / review comments)
 - For CI failures: which check was failing, root cause in one sentence, what changed
-- For review comments: how many threads addressed, any intentionally skipped and why
-- Confirmation that local checks pass
+- For review comments: how many threads addressed, any intentionally skipped/declined and why
+- Confirmation that local checks and diff implication review pass
+- **CodeRabbit re-review trigger:** If (and only if) unresolved review comments from **`coderabbitai[bot]`** were among the issues addressed and pushed, include:
+  ```markdown
+  @coderabbitai review and approve
+  ```
+  *(Do NOT include this tag if only merge conflicts, CI failures, or human-only comments were fixed).*
 
 Keep it concise — one or two short paragraphs. Reviewers and CI will do the final verification.
 
@@ -242,6 +294,9 @@ Keep it concise — one or two short paragraphs. Reviewers and CI will do the fi
 
 - **No new branches.** Push directly to the PR's head branch.
 - **No new Jira tickets.** This skill fixes an existing PR inline. If you discover a separate, non-trivial bug while fixing, note it in the PR comment for the author to file separately.
+- **Evaluate fix implications.** Always consider secondary impacts — a fix (especially from automated reviewers like CodeRabbit) must not create new bugs, break callers, or introduce regressions.
+- **Scope discipline.** Spend ample time deciding if a review fix is warranted. Do not apply out-of-scope or tangential suggestions that deviate from the PR's original intent.
+- **Trigger CodeRabbit re-review when applicable.** Always include `@coderabbitai review and approve` in the PR comment when CodeRabbit review comments were addressed and pushed.
 - **GitHub operations** can use GitHub MCP tools when available, or fall back to `git`/`gh` CLI — use whatever is present in the environment.
 - **Minimal commits.** One commit per problem type (conflict, CI, review) is ideal.
 - **Confirm before a force push.** Always ask the user before using destructive git push flags.

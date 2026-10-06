@@ -1,6 +1,7 @@
 ---
 name: start-work
 description: Use when the user runs /start-work or asks to create a Jira sub-task for the current work session.
+category: Fleet Engineering
 ---
 
 Create a Jira sub-task for the current work session.
@@ -27,9 +28,13 @@ Call `mcp__jira-mcp-server__create_issue` with:
 
 - `project_key`: from personal config (see fallback chain in `CLAUDE.md`) or parent ticket's project
 - `assignee`: from personal config (see fallback chain in `CLAUDE.md`)
-- `security_level`: `Red Hat Employee`
+- `security_level`: `Red Hat Employee` (ID `10034`)
+- `priority`: inherited from the parent ticket when set, otherwise `Normal`. Must never be omitted — Jira defaults to `Undefined` when not set.
+- `customfield_10464` (Activity Type): inherited `work_type` from the parent; if the parent has none set, default `Future Sustainability` (`10606`). Must always be set.
 - `parent`: parent ticket ID
 - Inherit `components`, `target_version`, `work_type`, and `labels` from the parent.
+
+> **Required-field reference:** this skill inherits most fields from its parent but must still populate the always-required set. See the `jira-create` skill's **Required Fields for Direct Creation** reference for the full field list, JSON shapes, and read-back rules.
 
 ## Step 5 — Comment on the new sub-task
 

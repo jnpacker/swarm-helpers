@@ -1,6 +1,7 @@
 ---
 name: bug-specialist
 description: Use when analyzing bugs, writing reproduction steps, planning fixes, or managing Jira bug issues. Covers bug triage, priority classification, lifecycle management, and bug content best practices.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

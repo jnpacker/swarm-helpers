@@ -1,6 +1,7 @@
 ---
 name: task-specialist
 description: Use when breaking down internal technical work, planning implementation tasks, creating infrastructure or maintenance tasks, or managing non-user-facing technical work in Jira.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

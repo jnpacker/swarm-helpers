@@ -1,6 +1,7 @@
 ---
 name: initiative-specialist
 description: Use when planning architectural or process improvements within a single product or engineering area, time-boxed to ~6 months or no larger than a single Quarter/Release, that enable Red Hat associates to operate more effectively without directly delivering customer-facing product functionality.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

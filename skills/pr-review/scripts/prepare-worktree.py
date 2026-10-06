@@ -22,6 +22,8 @@ Returns:
     Prints the path to the worktree directory on success.
 """
 
+import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -30,43 +32,62 @@ from git import Repo
 from git.exc import GitCommandError
 
 
-def get_pr_info(repo_path: str, pr_number: int) -> dict:
-    """Get PR information using gh CLI."""
+class _GhCommandError(Exception):
+    """Raised when a gh CLI invocation exits non-zero.
+
+    Kept distinct from ValueError so callers can add context (e.g. which
+    operation failed) without relying on fragile string-matching against
+    the underlying error text.
+    """
+
+
+def _run_gh_json(args: list[str], repo_path: str) -> dict:
+    """Run a gh CLI command and parse the JSON output."""
+    if not Path(repo_path).is_dir():
+        raise ValueError(f"Repository path does not exist: {repo_path}")
+
     try:
         result = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--json", "headRefName,headRefOid"],
+            ["gh"] + args,
             cwd=repo_path,
             capture_output=True,
             text=True,
             check=True,
         )
-        import json
         return json.loads(result.stdout)
-    except subprocess.CalledProcessError:
+    except FileNotFoundError as e:
+        if not Path(repo_path).exists():
+            raise ValueError(f"Repository path does not exist: {repo_path}") from e
+        raise ValueError("GitHub CLI (gh) is not installed or not in PATH.") from e
+    except PermissionError as e:
+        raise ValueError("GitHub CLI (gh) cannot be executed or access was denied.") from e
+    except subprocess.CalledProcessError as e:
+        raise _GhCommandError(f"gh exited with status {e.returncode}") from e
+    except json.JSONDecodeError as e:
+        raise ValueError("gh returned non-JSON output; check CLI version and auth.") from e
+
+
+def get_pr_info(repo_path: str, pr_number: int) -> dict:
+    """Get PR information using gh CLI."""
+    try:
+        return _run_gh_json(["pr", "view", str(pr_number), "--json", "headRefName,headRefOid"], repo_path)
+    except _GhCommandError as e:
         raise ValueError(
             f"Failed to get PR #{pr_number} information. "
             "Check that gh CLI is authenticated and the PR exists."
-        )
+        ) from e
 
 
 def get_repo_info(repo_path: str) -> tuple[str, str]:
     """Get the owner and name of the current repository using gh CLI."""
     try:
-        result = subprocess.run(
-            ["gh", "repo", "view", "--json", "owner,name"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        import json
-        repo_info = json.loads(result.stdout)
+        repo_info = _run_gh_json(["repo", "view", "--json", "owner,name"], repo_path)
         return repo_info["owner"]["login"], repo_info["name"]
-    except subprocess.CalledProcessError:
+    except _GhCommandError as e:
         raise ValueError(
             "Failed to get repository information. "
             "Check that gh CLI is authenticated and you are in a valid GitHub repository."
-        )
+        ) from e
 
 
 def find_remote_for_repo(repo: Repo, owner: str, repo_name: str) -> str:
@@ -131,6 +152,7 @@ def prepare_worktree(repo_path: str, pr_number: int) -> str:
 
     # Create README.md template in review-notes if it doesn't exist
     readme_path = review_notes_path / "README.md"
+    jira_item = "- [ ] Verified Jira issue reference in PR description"
     if not readme_path.exists():
         readme_template = f"""# PR #{pr_number} Review Notes
 
@@ -143,6 +165,7 @@ def prepare_worktree(repo_path: str, pr_number: int) -> str:
 
 ### 1. PR Summary Analysis
 - [ ] Reviewed PR description and metadata
+- [ ] Verified Jira issue reference in PR description
 - [ ] Reviewed file changes
 - [ ] Reviewed discussion timeline
 - [ ] Identified unresolved comments
@@ -189,6 +212,40 @@ def prepare_worktree(repo_path: str, pr_number: int) -> str:
 """
         readme_path.write_text(readme_template)
         print(f"Created review notes at: {review_notes_path}/README.md", file=sys.stderr)
+    else:
+        # Idempotently ensure the Jira verification checklist item is present in existing notes
+        content = readme_path.read_text()
+        if not re.search(
+            r"(?m)^-\s+\[[ xX]\]\s+Verified Jira issue reference in PR description\s*$",
+            content,
+        ):
+            if "- [ ] Reviewed PR description and metadata\n" in content:
+                content = content.replace(
+                    "- [ ] Reviewed PR description and metadata\n",
+                    f"- [ ] Reviewed PR description and metadata\n{jira_item}\n",
+                    1,
+                )
+            elif "- [x] Reviewed PR description and metadata\n" in content:
+                content = content.replace(
+                    "- [x] Reviewed PR description and metadata\n",
+                    f"- [x] Reviewed PR description and metadata\n{jira_item}\n",
+                    1,
+                )
+            elif "- [X] Reviewed PR description and metadata\n" in content:
+                content = content.replace(
+                    "- [X] Reviewed PR description and metadata\n",
+                    f"- [X] Reviewed PR description and metadata\n{jira_item}\n",
+                    1,
+                )
+            elif "### 1. PR Summary Analysis\n" in content:
+                content = content.replace(
+                    "### 1. PR Summary Analysis\n",
+                    f"### 1. PR Summary Analysis\n{jira_item}\n",
+                    1,
+                )
+            else:
+                content = f"{content.rstrip()}\n\n{jira_item}\n"
+            readme_path.write_text(content)
 
     # Check if worktree already exists
     if worktree_path.exists():
@@ -260,11 +317,15 @@ def main():
         sys.exit(1)
 
     repo_path = sys.argv[1]
-    pr_number = int(sys.argv[2])
 
     # Auth: rely on ambient gh credentials. For multi-org tokens, the caller
     # should prefix the invoke (see AGENTS.md / this skill's Prerequisites).
     try:
+        try:
+            pr_number = int(sys.argv[2])
+        except ValueError:
+            raise ValueError("PR_NUMBER must be an integer.")
+
         worktree_path = prepare_worktree(repo_path, pr_number)
         print(worktree_path)
     except Exception as e:

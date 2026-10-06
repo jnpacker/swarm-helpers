@@ -1,6 +1,7 @@
 ---
 name: story-specialist
 description: Use when creating user stories, defining acceptance criteria, planning end-user facing functionality, sizing stories, or linking stories to epics and features.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

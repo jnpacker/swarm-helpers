@@ -1,6 +1,7 @@
 ---
 name: outcome-specialist
 description: Use when defining strategic outcomes, connecting roadmap deliverables to corporate objectives, planning measurable business results, creating outcome issues that span multiple releases and teams, or understanding how outcomes are ranked and prioritized in Jira Advanced Roadmaps Plans.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

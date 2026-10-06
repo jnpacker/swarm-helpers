@@ -1,6 +1,7 @@
 ---
 name: epic-specialist
 description: Use when planning large work efforts spanning multiple sprints, coordinating cross-team epics, breaking complex initiatives into stories, or managing epic lifecycle and release alignment.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---

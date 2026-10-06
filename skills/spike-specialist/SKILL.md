@@ -1,6 +1,7 @@
 ---
 name: spike-specialist
 description: Use when conducting research, investigation, proof-of-concept work, or knowledge discovery for uncertain technical areas. Covers spike creation, time-boxing, research methods, and decision support.
+category: Fleet Engineering
 allowed-tools:
   - Read
 ---
