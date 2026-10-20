@@ -73,6 +73,15 @@ git commit -S -s -m "<subject line>"
 git push -u origin "<branch>"
 ```
 
+Signing semantics and failure handling:
+
+- `-s` appends the `Signed-off-by:` DCO trailer — an attestation in the
+  commit message, not a cryptographic signature.
+- `-S` cryptographically signs the commit with the locally configured key
+  (`user.signingkey` / `commit.gpgsign`). If git reports that no signing key
+  is configured and the repository requires signed commits, stop and ask the
+  user how to proceed — never silently drop `-S` and push an unsigned commit.
+
 ## Step 6 — Prepare and create the PR
 
 This step always runs, for both workflows. Only the final sub-step (6d) branches on fork vs. direct.

@@ -40,13 +40,13 @@ layout.
 | Skill / asset | Purpose |
 |---|---|
 | [`skills/start-work/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/start-work/SKILL.md) | Start Jira-backed implementation work |
-| [`skills/finish-work/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/finish-work/SKILL.md) | Finish implementation, prepare commits and PRs, update Jira |
-| [`skills/pr-fix/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-fix/SKILL.md) | Resolve PR review feedback, CI failures, and merge conflicts |
+| [`skills/finish-work/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/finish-work/SKILL.md) | Finish implementation, prepare commits and PRs, update Jira; distinguishes `-S` cryptographic signing from `-s` DCO sign-off |
+| [`skills/pr-fix/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-fix/SKILL.md) | Resolve PR review feedback, CI failures, and merge conflicts; blocks unsigned commits when signing is required |
 | [`skills/pr-hygiene/SKILL.md`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-hygiene/SKILL.md) | Audit PR age, review state, and staleness |
 | [`skills/pr-hygiene/scripts/pr-hygiene.py`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-hygiene/scripts/pr-hygiene.py) | PR hygiene scanner used by the skill |
 | [`skills/pr-review/scripts/summarize-pr.py`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-review/scripts/summarize-pr.py) | Collect and summarize PR context for review |
 | [`skills/pr-review/scripts/prepare-worktree.py`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/skills/pr-review/scripts/prepare-worktree.py) | Prepare an isolated worktree for PR review |
-| [`scripts/gh-commit.py`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/scripts/gh-commit.py) | Create a verified GitHub commit and open a PR |
+| [`scripts/gh-commit.py`](https://raw.githubusercontent.com/jnpacker/swarm-helpers/main/scripts/gh-commit.py) | Create a GitHub-signed, verified commit and open a PR; fails closed unless `verification.verified == true` |
 
 ## Dependency and maintenance notes
 
@@ -59,8 +59,13 @@ layout.
 - The PR review and hygiene scripts declare their Python dependencies inline;
   see each script's header for the runtime requirements.
 - `scripts/gh-commit.py` uses the GitHub API and its declared inline Python
-  dependencies; provide the credentials and repository context required by
-  the consuming prompt.
+  dependencies; provide a GitHub App installation token (the token type
+  GitHub signs API commits for) and repository context. It omits author,
+  committer, and signature overrides, and refuses branch/PR writes unless
+  GitHub reports `verification.verified == true`. It commits only files
+  already staged in the index; stage intended files before invoking it.
+  `Signed-off-by:` is a DCO trailer in the message, not a cryptographic
+  signature. There is no unsigned local-commit fallback.
 - The upstream source, destination path, and mirror status for each file are
   indexed in `scripts/swarm-helpers-manifest.txt` in the private maintenance
   repository.

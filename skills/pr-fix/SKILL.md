@@ -105,6 +105,20 @@ Before any write operation in Steps 4-7 (file edits, commits, pushes, PR/Jira co
 
 Re-check this gate immediately before each write step; do not assume a prior confirmation still applies.
 
+**Commit signing (applies to every commit in Steps 4A–4C):**
+
+- `-s` appends the `Signed-off-by:` DCO trailer — an attestation in the
+  commit message, not a cryptographic signature.
+- `-S` cryptographically signs the commit with the locally configured key
+  (`user.signingkey` / `commit.gpgsign`). If git reports that no signing key
+  is configured and the repository requires signed commits, stop and report —
+  never silently drop `-S`, and never substitute a plain unsigned commit or
+  push.
+- The `git merge` in Step 4A also creates a commit (the merge commit). If the
+  repository requires signed commits and merges are not being signed via
+  `commit.gpgsign`, resolve signing before merging rather than producing an
+  unsigned merge commit.
+
 ---
 
 ## Step 4A — Fix: Merge Conflicts
